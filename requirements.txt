@@ -7,7 +7,8 @@ ninja
 
 # Transformers 模型支持
 transformers==4.57.1
-triton==3.5.1
+# Triton 官方 wheel 主要面向 Linux；项目代码未直接导入 triton
+triton==3.5.1; sys_platform == "linux"
 
 # 数值计算
 numpy>=1.24.0
