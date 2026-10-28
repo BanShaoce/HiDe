@@ -149,11 +149,12 @@ def cycle_epoch_infer(gpu_id,rank,dataset_part,savedir,max_pixels,sig,thre):
 
     print(rank,len(dataset_part),device)
 
-    model_path = r"/home/luohaoyu.lhy/Shijiu/Qwen/Qwen2.5-VL-7B-Instruct"
+    # 模型路径：优先读环境变量 Qwen2_5_VL_MODEL_PATH，否则使用 HuggingFace 仓库 ID（自动从缓存/网络加载）
+    model_path = os.environ.get("Qwen2_5_VL_MODEL_PATH", "Qwen/Qwen2.5-VL-7B-Instruct")
     model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
         model_path,
         torch_dtype=torch.bfloat16,
-        attn_implementation="flash_attention_2",
+        attn_implementation=os.environ.get("HIDE_ATTN_IMPL", "flash_attention_2"),
         # load_in_8bit=True,
         device_map=device
     )

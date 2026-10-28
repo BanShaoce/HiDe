@@ -1,0 +1,9 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Editor
+.vscode/
+
+# V*Bench 数据集（约 268MB，不入库；服务器上用 prepare_vstar_dataset.py 重新下载）
+Hide/Qwen2.5/vstar_bench/
