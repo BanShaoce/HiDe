@@ -467,7 +467,70 @@ def find_top_n_attended_regions(norm_att, n, threshold=0.5):
 
     return final_boxes, len(final_boxes)
 
-def from_img_and_att_get_cropbox(inputs,attention, dicts, img_url, img_start, img_end,sig,thre):
+def annotate_boxes_on_original(image, normalized_bboxes, labels=None):
+    """在原图上绘制彩色框并返回 base64 PNG 列表（保留绝对空间布局，用于空间关系题）。"""
+    if not normalized_bboxes:
+        return []
+    # 解码图像
+    if isinstance(image, str) and not image.startswith('data:image;base64,'):
+        image64 = image_to_base64(image).split(',')[1]
+    else:
+        image64 = image.split(',')[1]
+    image_data = base64.b64decode(image64)
+    pil_img = Image.open(io.BytesIO(image_data)).convert("RGB")
+    img_bgr = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+    h, w = img_bgr.shape[:2]
+    # 归一化坐标 -> 像素坐标
+    pixel_boxes = []
+    for b in normalized_bboxes:
+        nx0, ny0, nx1, ny1 = b
+        x0 = int(min(max(nx0, 0.0), 1.0) * w); y0 = int(min(max(ny0, 0.0), 1.0) * h)
+        x1 = int(min(max(nx1, 0.0), 1.0) * w); y1 = int(min(max(ny1, 0.0), 1.0) * h)
+        if x1 > x0 and y1 > y0:
+            pixel_boxes.append([x0, y0, x1, y1])
+    if not pixel_boxes:
+        return []
+    pixel_boxes = merge_overlapping_bboxes(pixel_boxes)
+    colors = [(0,0,255),(0,255,0),(255,0,0),(0,255,255),(255,0,255),(0,128,255)]
+    thickness = max(2, w // 300)
+    for i, (x0, y0, x1, y1) in enumerate(pixel_boxes):
+        color = colors[i % len(colors)]
+        cv2.rectangle(img_bgr, (x0, y0), (x1, y1), color, thickness)
+    rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+    return [pil_to_base64(Image.fromarray(rgb))]
+
+def layout_faithful_transparent(image, normalized_bboxes):
+    """将实体 crop 按【原绝对位置】贴到全尺寸透明画布：去除背景 + 保留左右/上下布局。"""
+    if not normalized_bboxes:
+        return []
+    if isinstance(image, str) and not image.startswith('data:image;base64,'):
+        image64 = image_to_base64(image).split(',')[1]
+    else:
+        image64 = image.split(',')[1]
+    image_data = base64.b64decode(image64)
+    pil_img = Image.open(io.BytesIO(image_data)).convert("RGBA")
+    img_bgra = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGBA2BGRA)
+    h, w = img_bgra.shape[:2]
+    pixel_boxes = []
+    for b in normalized_bboxes:
+        nx0, ny0, nx1, ny1 = b
+        x0 = int(min(max(nx0, 0.0), 1.0) * w); y0 = int(min(max(ny0, 0.0), 1.0) * h)
+        x1 = int(min(max(nx1, 0.0), 1.0) * w); y1 = int(min(max(ny1, 0.0), 1.0) * h)
+        if x1 > x0 and y1 > y0:
+            pixel_boxes.append([x0, y0, x1, y1])
+    if not pixel_boxes:
+        return []
+    pixel_boxes = merge_overlapping_bboxes(pixel_boxes)
+    canvas = np.zeros((h, w, 4), dtype=np.uint8)
+    for x0, y0, x1, y1 in pixel_boxes:
+        x0c, y0c = max(0, x0), max(0, y0)
+        x1c, y1c = min(w, x1), min(h, y1)
+        if x1c > x0c and y1c > y0c:
+            canvas[y0c:y1c, x0c:x1c] = img_bgra[y0c:y1c, x0c:x1c]
+    canvas_rgba = cv2.cvtColor(canvas, cv2.COLOR_BGRA2RGBA)
+    return [pil_to_base64(Image.fromarray(canvas_rgba))]
+
+def from_img_and_att_get_cropbox(inputs,attention, dicts, img_url, img_start, img_end,sig,thre,spatial=False):
     tmp_att = []
     for i in range(len(attention)):
         if attention[i] is None:
@@ -541,12 +604,17 @@ def from_img_and_att_get_cropbox(inputs,attention, dicts, img_url, img_start, im
                     for boxid in range(len(img_merged_boxes[word][imgidx])):
                         bounding_boxes[imgidx].append(img_merged_boxes[word][imgidx][boxid])
             for imgidx in bounding_boxes:
-                img,bboxs = compact_and_center_with_relative_pos(imgidx,len(img_url),img_url[imgidx],bounding_boxes[imgidx])
-                if img:
-                    bounding_boxes[imgidx] = bboxs
-                    for im in img:
-                        highlight_imgs.append(im)
-                # highlight_imgs.append(compact_and_center_with_relative_pos_in_ori(image_list[imgidx],bounding_boxes[imgidx]))
+                if spatial:
+                    ann = layout_faithful_transparent(img_url[imgidx], bounding_boxes[imgidx])
+                    if ann:
+                        for im in ann:
+                            highlight_imgs.append(im)
+                else:
+                    img,bboxs = compact_and_center_with_relative_pos(imgidx,len(img_url),img_url[imgidx],bounding_boxes[imgidx])
+                    if img:
+                        bounding_boxes[imgidx] = bboxs
+                        for im in img:
+                            highlight_imgs.append(im)
             if not str(s) in results:results[str(s)] = {}
             # if not str(i) in results[s]:results[s][t] = {}
             results[str(s)][str(t)] = [img_merged_boxes,crop_list,words_lines,highlight_imgs,bounding_boxes]

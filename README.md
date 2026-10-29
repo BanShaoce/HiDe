@@ -1,200 +1,55 @@
-# 🙈 HiDe
+# 变更记录（Changelog）
 
-> **The official implementation of [HiDe: Rethinking The Zoom-IN method in High Resolution MLLMs via Hierarchical Decoupling](https://arxiv.org/abs/2510.00054)**
-
-<div align="center">
-
-[![Paper](https://img.shields.io/badge/📜_Paper-ArXiv-red)](https://arxiv.org/abs/2510.00054)
-[![License](https://img.shields.io/badge/📄_License-Apache_2.0-green)](LICENSE)
-[![Python](https://img.shields.io/badge/🐍_Python-3.11+-blue)]()
-[![中文文档](https://img.shields.io/badge/🇨🇳_中文文档-README_CN-blue)](README_CN.md)
-
-</div>
+本文件追踪 HiDe 复现与改进过程中的所有代码仓库变更与实验结果，便于项目版本管理。
 
 ---
 
-## 📰 News
+## [v0.3.0] - 2026-10-28~29（改进实验，进行中）
+### 目标：方法层面提升 V*Bench 效果（非调参）
+基线复现结果：HiDe 92.1%（ori 79.1%）。以下为三个方向的探索与结论：
 
-| Date | Update |
-|:----:|:-------|
-| 🎉 **2026/05/01** | Paper accepted to ICML 2026! Congratulations! |
-| 🔥 **2026/03/07** | Added support for Qwen3-VL! |
-| 💻 **2025/12/15** | Code released on GitHub! Feel free to open issues if you have questions~ |
-| 📕 **2025/10/28** | Paper released on ArXiv! |
+### 方向一：方案 A —— 空间保真的布局表示（❌ 负面结果）
+- 假设：紧凑+居中的表示破坏左右/上下空间参考系，是空间题失败主因。
+- 实现：`Get_box.py` 新增 `annotate_boxes_on_original`（原图画框）、`layout_faithful_transparent`（透明画布+原位置）；`inference.py` 按问题类型路由。
+- 结果：v1 空间 80.3%、v2 空间 82.9%，均低于基线 85.5%。
+- 结论：**假设被证伪**。原版紧凑图"去背景"收益 > "布局失真"损失，空间题瓶颈不在表示层。该方向放弃。
 
----
+### 方向二：方案 B —— 多层注意力融合（⚠️ 混合结果）
+- 假设：单层 `SELECT_LAYER=[15]` 是脆弱启发式，多层平均可降噪提升定位。
+- 实现：`modeling_qwen2_5_vl_re_infer.py` 的 `SELECT_LAYER=[12,15,18,21]`（`process()` 本就支持多层平均）。
+- 结果：空间 85.5%→86.8%（+3 修对 3 个"被带偏"、带偏 2 个），属性 96.5%→93.9%（−3），总体 91.1%。
+- 结论：**注意力粒度是任务相关的**——单层对属性题更优，多层对空间题更优。
 
-## 🎯 What is HiDe?
+### 方向三：任务自适应层选择（✅ 正收益，最终采用）
+- 动机：结合方向二结论，按任务类型自适应选择注意力层。
+- 实现：`inference.py` 用 `is_spatial_question()` 判定问题类型，动态设置
+  `modeling_qwen2_5_vl_re_infer.SELECT_LAYER = [12,15,18,21] if 空间 else [15]`。
+- **结果：总体 92.7%（+0.6pp），属性 96.5%（不变），空间 86.8%（+1.3pp）。**
 
-Multimodal Large Language Models (MLLMs) have made significant strides in visual understanding tasks. However, their performance on **high-resolution images** remains suboptimal.
-
-**Wait... is it really about "small objects"?** 🤔
-
-Our analysis reveals a different story: the main issue is **not object size**, but rather **complex background interference**! 🎭
-
-<div align="center">
-<img src="https://arxiv.org/html/2510.00054/pics/method.png" width="90%" alt="HiDe Framework"/>
-<p><em>Figure: Overview of the HiDe Framework (TAD + LPD)</em></p>
-</div>
-
-### 💡 Our Solution
-
-We propose the **Hierarchical Decoupling Framework (HiDe)** — a **training-free** framework that includes:
-
-| Component | What it does |
-|:----------|:--------------|
-| 🔍 **Token-wise Attention Decoupling (TAD)** | Decouples question tokens and identifies key information tokens, then leverages attention weights for precise alignment with target visual regions |
-| ✂️ **Layout-Preserving Decoupling (LPD)** | Decouples target regions from background and reconstructs a compact representation while preserving essential spatial layouts |
+### 涉及文件
+- `Hide/Qwen2.5/modeling_qwen2_5_vl_re_infer.py`：`SELECT_LAYER` 默认 `[15]`，支持运行时覆盖。
+- `Hide/Qwen2.5/inference.py`：新增 `is_spatial_question` 判定 + 动态层选择。
+- `Hide/Qwen2.5/utiles.py`：新增 `is_spatial_question()`。
+- `Hide/Qwen2.5/Get_box.py`：保留（未启用的）空间保真函数，`from_img_and_att_get_cropbox` 增加 `spatial` 参数（当前恒为 False）。
 
 ---
 
-## 🗂️ Repository Structure
-
-```
-HiDe/
-├── Hide/
-│   ├── Qwen2.5/              # 🤖 Qwen2.5-VL Implementation
-│   │   ├── inference.py          # Core inference logic
-│   │   ├── cycle_infer.py        # Multi-GPU inference entry
-│   │   ├── Get_box.py            # Attention-based bounding box extraction
-│   │   ├── Vstar_Metric.py       # Evaluation metrics
-│   │   └── utiles.py             # Utility functions
-│   │
-│   ├── Qwen3/                # 🔥 Qwen3-VL Implementation
-│   │   ├── inference.py
-│   │   ├── cycle_infer.py
-│   │   ├── Get_box.py
-│   │   └── utiles.py
-│   │
-│   └── Internvl/             # 👁️ InternVL3 Implementation
-│       ├── cycle_inference_internvl.py
-│       └── utiles_internvl.py
-│
-├── requirements.txt          # 📦 Dependencies
-├── LICENSE
-└── README.md
-```
+## [v0.2.1] - 2026-10-28（提交 5cffff9）
+### 复现完成
+- 新增 `Hide/Qwen2.5/Vstar_results.json`：V*Bench 191 条完整推理结果。
+- 新增 `复现报告.md`、演讲稿 .docx；清理 `tmp/` 调试文件。
+- **结果**：HiDe 总体 92.1%，与论文报告值一致。
 
 ---
 
-## 🛠️ Installation
-
-```bash
-# Create conda environment
-conda create -n HiDe python=3.11.4
-conda activate HiDe
-
-# Install dependencies
-pip install -r requirements.txt
-```
+## [v0.2.0] - 2026-10-28（提交 2e9b9a1）
+### 复现准备
+- `inference.py`：`model_path` 读环境变量 `Qwen2_5_VL_MODEL_PATH`；`attn_implementation` 读环境变量 `HIDE_ATTN_IMPL`。
+- `Vstar_Metric.py`：结果路径修正为 `Vstar_results.json`。
+- 新增 `prepare_vstar_dataset.py`、`setup_server.sh`、`Vstar.json`、`.gitignore`、`.gitattributes`。
+- `requirements.txt`：`triton` 仅 Linux 安装。
 
 ---
 
-## 📊 Dataset Preparation
-
-Prepare your dataset as a JSON file with the following structure:
-
-```json
-[
-    {
-        "id": "0",
-        "question": "What is the material of the glove?\n(A) rubber\n(B) cotton\n(C) kevlar\n(D) leather",
-        "labels": "A",
-        "image_path": "vstar_bench/direct_attributes/sa_4690.jpg",
-        "category": "direct_attributes"
-    },
-    {
-        "id": "1",
-        "question": "What is the color of the dustpan?\n(A) purple\n(B) red\n(C) blue\n(D) white",
-        "labels": "C",
-        "image_path": "vstar_bench/direct_attributes/sa_86101.jpg",
-        "category": "direct_attributes"
-    }
-]
-```
-
----
-
-## 🚀 Quick Start
-
-### For Qwen2.5-VL
-
-```bash
-cd Hide/Qwen2.5
-
-# Run inference
-python cycle_infer.py
-
-# Calculate metrics
-python Vstar_Metric.py
-```
-
-### For Qwen3-VL
-
-```bash
-cd Hide/Qwen3
-python cycle_infer.py
-```
-
-### For InternVL3
-
-```bash
-cd Hide/Internvl
-python cycle_inference_internvl.py
-```
-
----
-
-## ⚙️ Configuration
-
-Key hyperparameters you can adjust in `cycle_infer.py`:
-
-| Parameter | Description | Default |
-|:----------|:------------|:--------|
-| `sigma` | Gaussian filter sigma for attention smoothing | `[3]` |
-| `threshold` | Threshold for attention binarization | `[0.7]` |
-| `max_pixels` | Maximum pixel count for image processing | `16384` |
-| `Parallels` | Enable multi-GPU parallel processing | `True/False` |
-
----
-
-## 📝 Citation
-
-If you find HiDe helpful in your research, please consider citing:
-
-```bibtex
-@misc{liu2025hiderethinkingzoominmethod,
-      title={HiDe: Rethinking The Zoom-IN method in High Resolution MLLMs via Hierarchical Decoupling}, 
-      author={Xianjie Liu and Yiman Hu and Yixiong Zou and Liang Wu and Jian Xu and Bo Zheng},
-      year={2025},
-      eprint={2510.00054},
-      archivePrefix={arXiv},
-      primaryClass={cs.CV},
-      url={https://arxiv.org/abs/2510.00054}, 
-}
-```
-
----
-
-## 📄 License
-
-This project is licensed under the Apache 2.0 License — see the [LICENSE](LICENSE) file for details.
-
----
-
-## 🤝 Acknowledgements
-
-Thanks to all the amazing open-source projects that made this possible:
-- [Qwen2.5-VL](https://github.com/QwenLM/Qwen2.5-VL)
-- [Qwen3-VL](https://github.com/QwenLM/Qwen3-VL)
-- [InternVL](https://github.com/OpenGVLab/InternVL)
-
----
-
-<div align="center">
-
-**Made with ❤️ by the HiDe Team**
-
-⭐ If you find this project useful, please give us a star! ⭐
-
-</div>
+## [v0.1.0] - 2026-05-02（上游基线）
+- 基于上游 `Tennine2077/HiDe`（arXiv:2510.00054，ICML 2026）fork。

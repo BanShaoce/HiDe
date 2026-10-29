@@ -289,6 +289,18 @@ def detect_concentrated_regions_with_merge(matrix, k=3, merge_distance_ratio=0.1
     final_boxes = remove_nested_boxes(final_boxes)
     return final_boxes
 
+def is_spatial_question(text):
+    """判断问题是否为空间/关系类（需保留 left/right、前后、上下等绝对空间关系）。"""
+    if not text:
+        return False
+    t = text.lower()
+    keywords = [
+        "left", "right", "above", "below", "behind", "front", "closer",
+        "between", "side", "next to", "top of", "bottom", "facing", "near",
+        "under", "in front", "beside", "on the left", "on the right",
+    ]
+    return any(k in t for k in keywords)
+
 def load_dataset_Vstar_json(path):
     Vstar_list = []
     with open(path, 'r', encoding='utf-8') as f:

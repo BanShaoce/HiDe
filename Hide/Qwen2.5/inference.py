@@ -1,6 +1,7 @@
 import os
 from transformers import AutoTokenizer, AutoProcessor
 from modeling_qwen2_5_vl_re_infer import Qwen2_5_VLForConditionalGeneration
+import modeling_qwen2_5_vl_re_infer
 from qwen_vl_utils import process_vision_info
 import torch
 import torch.nn.functional as F
@@ -94,13 +95,16 @@ Now, following all the rules above, extract the entities from the question below
     answer_out = prompt_output_text[0].split("<FINAL_OUTPUT>")[-1].split("</FINAL_OUTPUT>")[0]
     messages[-1]["content"] = messages[-1]["content"][:-1]
     outputs = {}
+    is_spatial = is_spatial_question(ques)
+    # 任务自适应层选择：空间题用多层融合，属性题用单层 [15]
+    modeling_qwen2_5_vl_re_infer.SELECT_LAYER = [12, 15, 18, 21] if is_spatial else [15]
     
     #如果提取出了实体词
     if answer_out: 
         messages[-1]["content"].append({"type": "text", "text": "Search the following entities in the images: "+answer_out})
         text,image_inputs,video_inputs,inputs,video_kwargs = get_inputs(messages,qwen_processor,model)
         attention,idx2word_dicts,img_start,img_end = messages2att(model,qwen_processor,inputs)  # Retrieve attention from model outputs
-        results = from_img_and_att_get_cropbox(inputs,attention, idx2word_dicts, img_url, img_start, img_end,sig,thre)
+        results = from_img_and_att_get_cropbox(inputs,attention, idx2word_dicts, img_url, img_start, img_end,sig,thre,spatial=False)
         for s in sig:
             for t in thre:
                 img_merged_boxes,crop_list,words_lines,highlight_imgs,bounding_boxes = results[str(s)][str(t)]
@@ -123,7 +127,7 @@ Now, following all the rules above, extract the entities from the question below
         messages[-1]["content"].append({"type": "text", "text": "Search the following entities in the images: " + ques +"\nAnswer with the option's letter from the given choices directly."})
         text,image_inputs,video_inputs,inputs,video_kwargs = get_inputs(messages,qwen_processor,model)
         attention,idx2word_dicts,img_start,img_end = messages2att(model,qwen_processor,inputs)  # Retrieve attention from model outputs
-        results = from_img_and_att_get_cropbox(inputs,qwen_processor,attention, idx2word_dicts, img_url, img_start, img_end,sig,thre)
+        results = from_img_and_att_get_cropbox(inputs,attention, idx2word_dicts, img_url, img_start, img_end,sig,thre,spatial=False)
         for s in sig:
             for t in thre:
                 img_merged_boxes,crop_list,words_lines,highlight_imgs,bounding_boxes = results[str(s)][str(t)]
